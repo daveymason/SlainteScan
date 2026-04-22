@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server designed to act as a secure, legally-compl
 
 ## Technical & Clinical Architecture
 - **Language / Framework:** FastMCP & Python 3.11+
-- **Infrastructure:** Google Cloud Run (Serverless, fully IAM restricted).
+- **Infrastructure:** Google Cloud Run (Serverless, public ingress for hackathon testing with app-level API key enforcement).
 - **Core Principle - "Intelligence out of the Loop":** Data extraction utilizes GCP Document AI + Vertex AI strictly for identifying numerical values. Clinical triage outcomes are determined via isolated pure-Python code reflecting deterministic logic tables.
 - **FHIR Standards:** Hardened Pydantic mappings producing compliant FHIR R4 standard structures with active targeting toward specific native Irish OIDs (`urn:oid:1.3.6.1.4.1.54392.5.2690.42.80` for GMS ID assignments).
 
@@ -14,48 +14,49 @@ A Model Context Protocol (MCP) server designed to act as a secure, legally-compl
 - `src/clinical_rules.py`: The `if/elif` pure logic block driving Manchester Triage System (MTS) evaluation. No AI models operate here.
 - `src/fhir_ie_core.py`: Pydantic configurations defining Patient, Encounter, and Observations rendering `.model_dump()` to JSON standard output.
 
-## Deployment Mechanics (Security First Focus)
+## Deployment Mechanics (Hackathon Access Mode)
 
 ### Google Cloud Deploy
-Because of the sensitivity regarding Protected Health Information (PHI) crossing bounds via this service, all traffic is locked out by default.
-
-Initiate the deployment with standard `gcloud` invocations explicitly carrying the `--no-allow-unauthenticated` parameter footprint.
+For hackathon testing, Cloud Run can allow unauthenticated ingress while the MCP app enforces an `X-API-Key` header against the `SLAINTE_API_KEY` environment variable.
 
 ```bash
 gcloud run deploy slainte-scan-mcp \\
   --source . \\
   --region europe-west1 \\
   --port 8080 \\
-  --no-allow-unauthenticated
+  --allow-unauthenticated \\
+  --set-env-vars SLAINTE_API_KEY=slainte-hackathon-2026
 ```
 *(Ensure you modify `--region` to suit your project infrastructure location appropriately)*
 
 ### Verified Deployment Status
-Last verified on 2026-04-19.
+Last verified on 2026-04-22.
 
 - Service: `slainte-scan-mcp`
 - Region: `europe-west1`
-- Live URL: `https://slainte-scan-mcp-pu3yqiqtga-ew.a.run.app`
-- Access mode: authenticated only
+- Live URL: `https://slainte-scan-mcp-316076462477.europe-west1.run.app`
+- Access mode: unauthenticated ingress with app-level `X-API-Key` enforcement
 
-Quick authenticated connectivity check:
+Quick connectivity checks:
 
 ```bash
-TOKEN=$(gcloud auth print-identity-token)
 curl -i --max-time 5 \
-  -H "Authorization: Bearer $TOKEN" \
-  https://slainte-scan-mcp-pu3yqiqtga-ew.a.run.app/sse
+  -H "X-API-Key: slainte-hackathon-2026" \
+  https://slainte-scan-mcp-316076462477.europe-west1.run.app/sse
 ```
 
 Expected result: the SSE endpoint returns `HTTP/2 200` and begins streaming event data.
 
-### Access Strategy from Client Interfaces
-Agents attempting to initiate JSON-RPC communication via FastMCP's SSE wrapper interface will fail unless carrying corresponding bearer payloads verified against Google Workspace Service Accounts.
+Missing or incorrect API keys should return `HTTP/2 401`.
 
-You, or your orchestration agent pipeline toolset, must supply an Identity token generated against an authorized principal:
+### Access Strategy from Client Interfaces
+Agents attempting to initiate JSON-RPC communication via FastMCP's SSE wrapper interface must send the shared `X-API-Key` header configured in the Prompt Opinion portal.
+
+Prompt Opinion configuration:
 
 ```bash
-gcloud auth print-identity-token
+API Key Header Name: X-API-Key
+API Key Header Value: slainte-hackathon-2026
 ```
 
-Pass this as the `Authorization: Bearer <TOKEN>` header natively inside the context-connecting configurations mapped across on the Prompt Opinion environment interface to bridge calls up toward the tool boundary.
+Pass this header with every request so traffic can reach the FastMCP app and be accepted by the middleware.

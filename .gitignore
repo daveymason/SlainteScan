@@ -26,6 +26,7 @@ share/python-wheels/
 
 # Virtual environments
 venv/
+.venv/
 env/
 .env/
 ENV/

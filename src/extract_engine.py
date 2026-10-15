@@ -1,9 +1,10 @@
 import os
 import json
+import base64
 import logging
 from google.cloud import documentai
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig, Part
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -12,20 +13,42 @@ async def extract_vitals_and_symptoms(image_bytes: bytes) -> dict:
     1. Uses Document AI for extracting raw text from the handwriting (if processor set).
     2. Uses Vertex AI (Gemini) strictly to parse the text into clinical variables.
     """
-    project_id = os.environ.get("GOOGLE_CLOUD_PROJECT", "demodayz")
+    # Bulletproof network decoding: handle str, or bytes containing base64
+    if isinstance(image_bytes, str):
+        image_bytes = base64.b64decode(image_bytes)
+    elif isinstance(image_bytes, bytes):
+        # If the bytes themselves are base64 string bytes, decode them
+        if image_bytes.startswith(b"/9j/") or image_bytes.startswith(b"iVBORw0KGgo") or image_bytes.startswith(b"JVBERi"):
+            image_bytes = base64.b64decode(image_bytes)
+            
+    # Auto-detect correct mime-type for strict Google validation
+    if image_bytes.startswith(b"\xff\xd8"):
+        detected_mime_type = "image/jpeg"
+    elif image_bytes.startswith(b"\x89PNG"):
+        detected_mime_type = "image/png"
+    elif image_bytes.startswith(b"%PDF"):
+        detected_mime_type = "application/pdf"
+    else:
+        detected_mime_type = "application/pdf" # Fallback safely for his chat upload
+        
+    project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
+    if not project_id:
+        project_id = "slainte-scan-mcp-99021"
     location = os.environ.get("GCP_LOCATION", "eu") 
     processor_id = os.environ.get("DOC_AI_PROCESSOR_ID")
     
     if not processor_id:
         logger.info("No DOC_AI_PROCESSOR_ID provided. Executing unified OCR + Extraction native via Gemini Multimodal.")
         
-        # Initialize Vertex AI for the local Google Cloud project
-        # Using europe-west1 as a standard for Irish/EU deployments
-        vertexai.init(project=project_id, location="europe-west1")
+        # Initialize Google GenAI Client with explicit API Key
+        gemini_api_key = os.environ.get("GEMINI_API_KEY")
+        if not gemini_api_key:
+            logger.error("GEMINI_API_KEY is not set in environment.")
+            return {}
+        client = genai.Client(api_key=gemini_api_key)
         
         # Construct multimodal payload
-        image_part = Part.from_data(data=image_bytes, mime_type="image/jpeg") 
-        model = GenerativeModel("gemini-1.5-pro-001")
+        image_part = types.Part.from_bytes(data=image_bytes, mime_type=detected_mime_type)
         
         prompt = """
         You are purely a data extraction parser acting as a legal medical component. 
@@ -42,9 +65,10 @@ async def extract_vitals_and_symptoms(image_bytes: bytes) -> dict:
         """
         
         # Force the LLM to reply purely in JSON so it never breaks our deterministic engine format
-        response = model.generate_content(
-            [image_part, prompt],
-            generation_config=GenerationConfig(response_mime_type="application/json")
+        response = client.models.generate_content(
+            model="gemini-3.1-pro-preview",
+            contents=[image_part, prompt],
+            config=types.GenerateContentConfig(response_mime_type="application/json")
         )
         
         try:
@@ -59,14 +83,17 @@ async def extract_vitals_and_symptoms(image_bytes: bytes) -> dict:
         docai_client = documentai.DocumentProcessorServiceClient()
         name = docai_client.processor_path(project_id, location, processor_id)
         
-        raw_document = documentai.RawDocument(content=image_bytes, mime_type="image/jpeg")
+        raw_document = documentai.RawDocument(content=image_bytes, mime_type=detected_mime_type)
         request = documentai.ProcessRequest(name=name, raw_document=raw_document)
         result = docai_client.process_document(request=request)
         ocr_text = result.document.text
         
-        # 2. Vertex AI Semantic Extraction
-        vertexai.init(project=project_id, location="europe-west1")
-        model = GenerativeModel("gemini-1.5-pro-001")
+        # 2. Google AI Studio Semantic Extraction
+        gemini_api_key = os.environ.get("GEMINI_API_KEY")
+        if not gemini_api_key:
+            logger.error("GEMINI_API_KEY is not set in environment.")
+            return {}
+        client = genai.Client(api_key=gemini_api_key)
         
         prompt = f"""
         You are a data extraction parser. Strip the variables from the following raw OCR text.
@@ -83,9 +110,10 @@ async def extract_vitals_and_symptoms(image_bytes: bytes) -> dict:
         {ocr_text}
         """
         
-        response = model.generate_content(
-            prompt,
-            generation_config=GenerationConfig(response_mime_type="application/json")
+        response = client.models.generate_content(
+            model="gemini-3.1-pro-preview",
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json")
         )
         
         try:

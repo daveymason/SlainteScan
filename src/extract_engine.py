@@ -2,9 +2,18 @@ import os
 import json
 import base64
 import logging
-from google.cloud import documentai
-from google import genai
-from google.genai import types
+
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None
+
+try:
+    from google.cloud import documentai
+except ImportError:
+    documentai = None
 
 logger = logging.getLogger(__name__)
 

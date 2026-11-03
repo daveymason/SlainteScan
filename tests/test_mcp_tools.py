@@ -115,5 +115,58 @@ class TestFhirGenerationAndValidation(unittest.TestCase):
         self.assertEqual(pt["identifier"][0]["system"], IRISH_GMS_OID)
         self.assertEqual(pt["identifier"][0]["value"], "99123-A")
 
+class TestNews2AndSafetyGate(unittest.TestCase):
+    def test_news2_high_risk(self):
+        from src.clinical_rules import calculate_news2_score
+        # Extreme physiological deterioration: RR 28, SpO2 89, on O2, SBP 85, HR 135, CVPU, Temp 39.2
+        vitals = {
+            "respiratory_rate": 28,
+            "spo2": 89,
+            "supplemental_o2": True,
+            "systolic_bp": 85,
+            "heart_rate": 135,
+            "consciousness": "U",
+            "temperature": 39.2
+        }
+        res = calculate_news2_score(vitals)
+        self.assertGreaterEqual(res["news2_score"], 7)
+        self.assertEqual(res["risk_level"], "High")
+        self.assertIn("Continuous", res["monitoring_frequency"])
+
+    def test_news2_low_risk_normal_vitals(self):
+        from src.clinical_rules import calculate_news2_score
+        vitals = {
+            "respiratory_rate": 16,
+            "spo2": 98,
+            "supplemental_o2": False,
+            "systolic_bp": 120,
+            "heart_rate": 72,
+            "consciousness": "ALERT",
+            "temperature": 36.8
+        }
+        res = calculate_news2_score(vitals)
+        self.assertEqual(res["news2_score"], 0)
+        self.assertEqual(res["risk_level"], "Low")
+
+    def test_penicillin_allergy_intercepts_coamoxiclav(self):
+        from src.clinical_rules import check_drug_allergy_contraindications
+        allergies = [{"text": "Severe Penicillin allergy", "code": "91936005"}]
+        medications = ["Co-Amoxiclav 625mg PO TDS", "Paracetamol 1g PO QDS"]
+        alerts = check_drug_allergy_contraindications(allergies, medications)
+        self.assertTrue(len(alerts) >= 1)
+        self.assertEqual(alerts[0]["severity"], "CRITICAL")
+        self.assertEqual(alerts[0]["alert_type"], "CONTRAINDICATION")
+        self.assertIn("anaphylaxis", alerts[0]["message"].lower())
+
+    def test_nsaid_allergy_intercepts_ibuprofen(self):
+        from src.clinical_rules import check_drug_allergy_contraindications
+        allergies = ["Aspirin/NSAID induced asthma"]
+        medications = ["Ibuprofen 400mg PO PRN"]
+        alerts = check_drug_allergy_contraindications(allergies, medications)
+        self.assertTrue(len(alerts) >= 1)
+        self.assertEqual(alerts[0]["severity"], "HIGH")
+        self.assertEqual(alerts[0]["alert_type"], "CONTRAINDICATION")
+
 if __name__ == "__main__":
     unittest.main()
+

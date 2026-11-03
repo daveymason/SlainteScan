@@ -15,7 +15,12 @@ from typing import Dict, Any, Optional, Union, List
 from fastmcp import FastMCP
 
 from .extract_engine import extract_vitals_and_symptoms
-from .clinical_rules import calculate_mts_category as _calc_mts, get_mts_details
+from .clinical_rules import (
+    calculate_mts_category as _calc_mts,
+    get_mts_details,
+    calculate_news2_score as _calc_news2,
+    check_drug_allergy_contraindications as _check_allergy
+)
 from .fhir_ie_core import generate_fhir_bundle as _gen_bundle
 from .terminology import resolve_terminology as _resolve_term
 from .schema_scanner import scan_clinical_schema as _scan_schema
@@ -60,6 +65,27 @@ def calculate_mts_category(vitals: Dict[str, Any]) -> Dict[str, Any]:
         "category": cat,
         **details
     }
+
+@mcp.tool()
+def calculate_news2_score(vitals: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Calculates National Early Warning Score 2 (NEWS2) and clinical risk tier deterministically.
+    Inputs: Respiration rate, SpO2 (Scale 1/2), Supplemental O2, Systolic BP, Heart Rate, Consciousness (Alert/CVPU), Temperature.
+    Returns: news2_score (0-20), risk_level (Low/Low-Medium/Medium/High), monitoring_frequency, and breakdown.
+    """
+    logger.info("Calculating NEWS2 deterioration score.")
+    return _calc_news2(vitals)
+
+@mcp.tool()
+def check_drug_allergy_contraindications(patient_allergies: List[Any], candidate_medications: List[Any]) -> List[Dict[str, Any]]:
+    """
+    Deterministic clinical safety gate: cross-checks candidate medications against
+    documented patient allergies to detect severe contraindications and anaphylaxis risks.
+    Returns: List of detected alerts with severity, allergen, medication, and clinical rationale.
+    """
+    logger.info(f"Checking drug-allergy contraindications for {len(candidate_medications or [])} medications against {len(patient_allergies or [])} allergies.")
+    return _check_allergy(patient_allergies, candidate_medications)
+
 
 @mcp.tool()
 def validate_fhir_resource(resource: Union[Dict[str, Any], str]) -> Dict[str, Any]:

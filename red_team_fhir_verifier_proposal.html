@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autonomous Red-Teaming and Terminology Verification Agent for HL7 FHIR R4 APIs</title>
+  <style>
+    :root {
+      font-size: 12pt;
+    }
+
+    body {
+      font-family: "Times New Roman", Times, serif;
+      font-size: 1rem; /* 12pt base text */
+      line-height: 1.5;
+      color: #111111;
+      background-color: #ffffff;
+      margin: 0;
+      padding: 2rem 1.5rem;
+      text-align: start;
+      overflow-wrap: break-word;
+    }
+
+    article {
+      max-width: 80ch;
+      margin: 0 auto;
+    }
+
+    h1, h2, h3 {
+      font-family: Verdana, Geneva, sans-serif;
+      color: #1b4d3e;
+      text-wrap: balance;
+      line-height: 1.3;
+      margin-top: 1.4rem;
+      margin-bottom: 0.45rem;
+    }
+
+    h1 {
+      font-size: 1.3rem;
+      border-bottom: 1.5px solid #1b4d3e;
+      padding-bottom: 0.35rem;
+      margin-top: 0;
+    }
+
+    h2 {
+      font-size: 1.05rem;
+    }
+
+    p, li {
+      font-family: "Times New Roman", Times, serif;
+      font-size: 1rem; /* 12pt */
+      text-wrap: pretty;
+      margin-top: 0;
+      margin-bottom: 0.8rem;
+    }
+
+    code {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 0.92rem;
+      background-color: #f4f6f5;
+      padding: 0.05rem 0.2rem;
+    }
+
+    figure {
+      margin: 1.2rem 0;
+      padding: 0.8rem;
+      border: 1px solid #cbd5d0;
+      background-color: #fafcfb;
+      text-align: center;
+    }
+
+    figcaption {
+      font-family: "Times New Roman", Times, serif;
+      font-size: 0.92rem;
+      font-style: italic;
+      color: #333333;
+      margin-top: 0.45rem;
+    }
+
+    .references {
+      list-style-type: none;
+      padding-left: 0;
+    }
+
+    .references li {
+      padding-left: 1.5rem;
+      text-indent: -1.5rem;
+      margin-bottom: 0.55rem;
+    }
+
+    a {
+      color: #1b4d3e;
+      text-decoration: underline;
+    }
+
+    @media print {
+      body {
+        padding: 0;
+      }
+      article {
+        max-width: none;
+      }
+      figure {
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <article>
+    <h1>Autonomous Red-Teaming and Terminology Verification Agent for HL7 FHIR R4 APIs</h1>
+
+    <h2>1. Problem Identification and Justification (15%)</h2>
+    <p>
+      Irish hospitals are currently replacing closed HL7 v2 networks with web-facing HL7 FHIR R4 APIs under the Sláintecare reform programme, the <em>Digital for Care 2030</em> roadmap, and the European Health Data Space (EHDS) regulation. Putting clinical data on REST endpoints makes it much easier to connect patient portals and regional shared care records. Yet it leaves Health Service Executive (HSE) integration engineers and hospital security staff dealing with two stubborn problems at once: silent clinical coding drift and Broken Object Level Authorization (BOLA / CWE-639).
+    </p>
+    <p>
+      On the clinical side, a FHIR server will happily store a syntactically valid <code>Observation</code> or <code>Condition</code> JSON payload even if the attached SNOMED CT code contradicts the nurse's free-text triage note, or if a LOINC vital sign uses a loose string like <code>mmHg</code> where strict UCUM requires <code>mm[Hg]</code>. On the security side, BOLA sits at the top of the OWASP API Security list (API1:2023) because the HTTP requests that exploit it look completely normal. A user logs in via OAuth 2.0 / SMART-on-FHIR and gets a valid token for <code>Patient/A</code>. If the server verifies the token signature but forgets to check compartment ownership on the requested ID, that user can pull or edit <code>Patient/B</code>'s medical history.
+    </p>
+    <p>
+      Why don't standard testing tools catch this? Static JSON Schema validators only check structure. They cannot read a written note about penicillin anaphylaxis and spot that a coded prescription puts the patient in danger. Traditional Dynamic Application Security Testing (DAST) tools like OWASP ZAP and OpenAPI fuzzers like Schemathesis fail for a different reason. They expect nested URL paths such as <code>/users/123/orders/456</code>. FHIR stores resources in flat endpoints like <code>/Observation/456</code> and buries patient ownership inside internal JSON pointers (<code>subject.reference</code>) or graph search modifiers like <code>_include</code>, <code>_revinclude</code>, and reverse-chained <code>_has</code> queries. And because a successful BOLA breach returns a clean <code>200 OK</code> with valid FHIR JSON, single-session fuzzers treat the data leak as a passing test. Kaur (2026) looked at more than 100 real-world BOLA bug bounty reports and found that only 22.6% rely on sequential integer IDs that basic fuzzers can guess; 39.2% use non-sequential UUIDs or hashes, and 41.7% involve state-changing write calls. An LLM agent fits this gap because it can read clinical prose against terminology rules while writing multi-step Python scripts that harvest leaked graph references (like shared <code>Practitioner</code> or <code>Encounter</code> IDs) to test cross-patient access.
+    </p>
+
+    <h2>2. Data Evaluation (15%)</h2>
+    <p>
+      We cannot touch real patient records for a university project under GDPR and Irish Health Research Regulations. All development and testing in Assignment 2 will run on open standards and synthetic cohorts. For structured patient data, we will generate 1,000 longitudinal FHIR R4 records using MITRE's Synthea simulator, which is freely available under the Apache 2.0 licence (Walonoski et al., 2018). We will add simulated Irish Individual Health Identifiers (IHIs) to those records and load them into a partitioned HAPI FHIR R4 server configured with five SMART-on-FHIR v2 test accounts: two patients (<code>ID_PAT_A</code> and victim baseline <code>ID_PAT_B</code>), a family carer, an acute clinician, and an IoT gateway token. To check clinical codes without relying on the LLM's internal memory, we will pull the public-domain HL7 FHIR R4 <code>StructureDefinition</code> and <code>CompartmentDefinition/Patient</code> JSON schemas (CC0), the LOINC v2.78 table (royalty-free Regenstrief licence), and the SNOMED CT Irish/International RF2 release (free to use in SNOMED Member territories, including Ireland through the HSE).
+    </p>
+    <p>
+      Unstructured inputs will come from SNOMED CT editorial guides, OWASP API Security test playbooks (CC BY-SA 4.0), and the server's live <code>/metadata</code> (<code>CapabilityStatement</code>) and <code>/.well-known/smart-configuration</code> files. We will also include multimodal data by feeding synthetic scanned triage forms and PDF attachments (stored in FHIR <code>Binary</code> and <code>DocumentReference</code> resources) into an optical character recognition (OCR) step to see if messy handwriting causes coding mistakes or indirect prompt injections. From these sources, our pipeline extracts seven input features: the resource type (<code>resourceType</code>), coding triples (<code>system</code>, <code>code</code>, <code>display</code>), UCUM value blocks (<code>valueQuantity.value</code> and <code>code</code>), graph reference pointers (<code>subject.reference</code>, <code>encounter.reference</code>, <code>Patient.link</code>), OAuth 2.0 scope claims, HTTP status codes with <code>OperationOutcome.issue</code> text, and query latency in milliseconds.
+    </p>
+
+    <h2>3. Investigate and Compare Current Approaches (20%)</h2>
+    <p>
+      There are a few ways we could apply generative AI to FHIR verification and penetration testing. The simplest option is zero-shot prompting with commercial cloud models like OpenAI's <code>GPT-5.6</code>, Google's <code>Gemini 3.8 Pro</code>, or Anthropic's <code>Claude Sonnet 4.5</code> (and <code>5.5</code>). Those models read clinical notes well, but single-turn prompts lose track of state during multi-hop API tests, make up fake 9-digit SNOMED CT codes when ungrounded, and force us to send hospital API schemas to outside servers. A second route is Retrieval-Augmented Generation (RAG) with constrained JSON decoding, similar to static test generators like Karate-BOLA-Guard. Hooking an LLM up to a local SNOMED CT and FHIR schema index stops it from inventing codes. Even so, a plain RAG pipeline is too passive for pen-testing. It cannot run a bash script, inspect a live HTTP <code>422 Unprocessable Entity</code> error, or adjust a blocked query by itself.
+    </p>
+    <p>
+      That brings us to autonomous tool-using agents. Recent benchmarks show that how an agent manages its state matters much more than raw model size. In the MAPTA study, letting an LLM call tools without strict guardrails actually correlated negatively with exploit success ($r = -0.31$) because the model wasted its context budget guessing random inputs. Tran et al. (2026) fixed this failure mode in Red-MIRROR by pairing an append-only shared text memory with a Dual-Phase Reflection loop. When a single command fails with a syntax error, local <em>Intra-Reflection</em> rewrites the payload; when an attack vector hits repeated <code>403 Forbidden</code> blocks, global <em>Inter-Reflection</em> drops that path and switches to a new angle, reaching an 86.0% success rate on the XBOW benchmark (compared to 50.0% for linear PentestAgent runs).
+    </p>
+    <p>
+      For Assignment 2, we plan to use <strong><code>Qwen3-Coder-32B</code></strong> (alongside the sparse Mixture-of-Experts variant <strong><code>Qwen3.6-35B-A3B</code></strong> for faster local runs, and benchmarked against <strong><code>DeepSeek-V4</code></strong> and <strong><code>Claude Sonnet 4.5</code></strong>) running locally on Ollama/vLLM inside the <strong>OpenHands</strong> platform. Under the hood, Qwen3-Coder is an autoregressive Transformer decoder that uses Grouped-Query Attention (GQA) to keep key-value cache memory low, Rotary Position Embeddings (RoPE) across a 128k-token context window, and SwiGLU feed-forward layers (where the 35B-A3B MoE model activates just 3B parameters per token). It is pre-trained on trillions of code and technical tokens before going through Supervised Fine-Tuning (SFT) and Direct Preference Optimization (DPO) on multi-step coding traces. That background makes it very dependable at writing Python HTTP test scripts and picking apart nested FHIR JSON. The obvious trade-off is hardware versus privacy: running a 4-bit quantised 32B/35B model locally takes 18–22 GB of VRAM and generates tokens more slowly than a cloud API, but it costs nothing per token and keeps all hospital telemetry on local hardware.
+    </p>
+
+    <h2>4. Proposed Solution Design (20%)</h2>
+    <p>
+      For our CA2 implementation, we will package the <strong>SlainteFHIR Auditor</strong> inside Docker using the OpenHands <code>CodeActAgent</code> harness (Wang et al., 2025). Instead of outputting static text, the agent interacts with the target server by writing and running Python code in a sandboxed container and calling deterministic Model Context Protocol (MCP) tools.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 740 125" width="100%" height="auto" role="img" aria-label="Architecture diagram of the proposed SlainteFHIR Auditor using OpenHands and FastMCP">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#1b4d3e"/>
+          </marker>
+        </defs>
+        <!-- Node 1: FHIR Server -->
+        <rect x="10" y="30" width="150" height="65" rx="4" fill="#eef5f2" stroke="#1b4d3e" stroke-width="1.5"/>
+        <text x="85" y="54" font-family="Verdana, sans-serif" font-size="10.5" font-weight="bold" text-anchor="middle" fill="#111">Target FHIR R4 API</text>
+        <text x="85" y="70" font-family="Times New Roman, serif" font-size="10.5" text-anchor="middle" fill="#333">/metadata &amp; SMART v2</text>
+        <text x="85" y="84" font-family="Times New Roman, serif" font-size="10.5" text-anchor="middle" fill="#333">Partitioned Cohorts</text>
+
+        <!-- Arrow 1 <-> 2 -->
+        <line x1="160" y1="62" x2="240" y2="62" stroke="#1b4d3e" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+        <text x="200" y="50" font-family="Times New Roman, serif" font-size="10" text-anchor="middle" fill="#111">1. Prune &amp; Probe</text>
+
+        <!-- Node 2: OpenHands Agent -->
+        <rect x="240" y="25" width="180" height="75" rx="4" fill="#eef5f2" stroke="#1b4d3e" stroke-width="1.5"/>
+        <text x="330" y="48" font-family="Verdana, sans-serif" font-size="10.5" font-weight="bold" text-anchor="middle" fill="#111">OpenHands CodeAct</text>
+        <text x="330" y="64" font-family="Times New Roman, serif" font-size="10.5" text-anchor="middle" fill="#333">Qwen3-Coder (Local)</text>
+        <text x="330" y="80" font-family="Times New Roman, serif" font-size="10.5" text-anchor="middle" fill="#333">Dual-Phase Reflection</text>
+
+        <!-- Arrow 2 <-> 3 -->
+        <line x1="420" y1="45" x2="505" y2="32" stroke="#1b4d3e" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+        <text x="462" y="26" font-family="Times New Roman, serif" font-size="10" text-anchor="middle" fill="#111">2. MCP Lookup</text>
+
+        <!-- Node 3: MCP Server -->
+        <rect x="505" y="5" width="225" height="50" rx="4" fill="#eef5f2" stroke="#1b4d3e" stroke-width="1.5"/>
+        <text x="617" y="26" font-family="Verdana, sans-serif" font-size="10.5" font-weight="bold" text-anchor="middle" fill="#111">FastMCP Verifier Server</text>
+        <text x="617" y="43" font-family="Times New Roman, serif" font-size="10.5" text-anchor="middle" fill="#333">SNOMED RF2, LOINC &amp; UCUM</text>
+
+        <!-- Arrow 2 -> 4 -->
+        <line x1="420" y1="78" x2="505" y2="92" stroke="#1b4d3e" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <text x="462" y="102" font-family="Times New Roman, serif" font-size="10" text-anchor="middle" fill="#111">3. Diff Oracle</text>
+
+        <!-- Node 4: Oracle & Output -->
+        <rect x="505" y="68" width="225" height="50" rx="4" fill="#eef5f2" stroke="#1b4d3e" stroke-width="1.5"/>
+        <text x="617" y="89" font-family="Verdana, sans-serif" font-size="10.5" font-weight="bold" text-anchor="middle" fill="#111">Differential Oracle &amp; UI</text>
+        <text x="617" y="106" font-family="Times New Roman, serif" font-size="10.5" text-anchor="middle" fill="#333">SARIF v2.1.0 &amp; OperationOutcome</text>
+      </svg>
+      <figcaption>Figure 1: Proposed end-to-end architecture of the SlainteFHIR Auditor in OpenHands.</figcaption>
+    </figure>
+
+    <p>
+      Pointing an LLM straight at 140+ FHIR resource types wastes tokens, so each audit starts with a deterministic Python reachability filter. That script reads <code>/metadata</code> and <code>/.well-known/smart-configuration</code>, compares the server's active endpoints against <code>CompartmentDefinition/Patient</code>, and drops static terminology routes like <code>ValueSet</code> or <code>CodeSystem</code> (trimming the search surface by more than 90%). Once the target map is ready, the OpenHands agent runs two continuous loops. In the <em>Terminology Verifier</em> loop, the agent pulls newly stored FHIR bundles and passes every <code>CodeableConcept</code> and <code>valueQuantity</code> block to our FastMCP server, which queries a local SQLite/Tantivy index of SNOMED CT RF2, LOINC, and UCUM rules. The LLM then compares the free-text clinical notes against the validated codes to catch semantic mismatches or unflagged drug-allergy conflicts.
+    </p>
+    <p>
+      In the <em>Red-Team</em> loop, the agent first crawls the sandbox using victim token <code>ID_PAT_B</code> to record ground-truth resource hashes and map shared bridge nodes (such as a common <code>Practitioner</code> or <code>Location</code>). It then switches to low-privilege tokens (<code>ID_PAT_A</code>, <code>ID_CARER_A</code>) and writes Python <code>httpx</code> scripts to test six FHIR-specific attack paths: direct leaf reads (<code>/Observation/{id}</code>, <code>/Binary/{id}</code>), forward and reverse inclusions (<code>_include</code>, <code>_revinclude</code>), reverse chaining (<code>_has:Observation:patient:code</code>), dual-membership pivots (<code>performer</code> vs. <code>subject</code>), batch bundle smuggling, and <code>Patient.link</code> compartment annexation. What happens when a query fails? If the server returns <code>400 Bad Request</code>, Intra-Reflection reads the <code>OperationOutcome</code> error message and repairs the search syntax; if an endpoint returns three consecutive <code>403 Forbidden</code> responses, Inter-Reflection logs that vector as hardened and moves on. Finally, a Multi-Identity Differential Oracle compares the attacker's response against <code>ID_PAT_B</code>'s ground-truth baseline and writes confirmed findings into a SARIF v2.1.0 file (<code>slaintefhir-audit.sarif.json</code>) and an HTMX audit dashboard.
+    </p>
+
+    <h2>5. Risks, Limitations and Ethics (20%)</h2>
+    <p>
+      Our proposed setup has real technical limits. A local 32B/35B model can still misjudge complex post-coordinated SNOMED CT expressions or lose track of earlier steps during a 25-turn OpenHands session. Summarising large FHIR Bundles into short telemetry tuples to save context space can also hide subtle data leaks tucked inside custom <code>StructureDefinition</code> extensions. And because the agent only tests the HTTP FHIR REST layer, it is completely blind to downstream protocol leaks, such as a hospital server exporting unencrypted HL7 v2 messages to a legacy Mirth Connect interface engine. On the practical side, keeping the full SNOMED CT RF2 database (&gt;360,000 concepts) alongside a 20 GB VRAM GPU and a partitioned HAPI FHIR container takes workstation hardware that small clinics rarely own.
+    </p>
+    <p>
+      There is also an obvious ethical risk: an automated BOLA and terminology red-teaming agent is a dual-use tool (Barach, 2026). If someone aimed write-level probes (<code>PATCH</code>, <code>DELETE</code>, or <code>Patient.link</code> updates) at a live hospital server, it could corrupt real clinical records or leak patient identities. To comply with GDPR, the EU AI Act, and HIQA audit rules, our CA2 build will hardcode three safety locks into the HTTP client: transport-layer IP pinning that blocks any address outside local RFC 1918 Docker subnets (<code>127.0.0.1/8</code>, <code>172.16.0.0/12</code>), a mandatory startup check confirming that the target server's <code>/metadata</code> sets <code>CapabilityStatement.experimental == true</code>, and copy-on-write database snapshots so any destructive test resets as soon as the run finishes.
+    </p>
+
+    <h2>6. References (10%)</h2>
+    <ul class="references">
+      <li>
+        Barach, J. (2026) <em>AuthProbe: Specification-Driven, Multi-Identity Detection of Broken Object-Level Authorization in Recruitment API</em>. arXiv:2607.20574. Available at: <a href="https://arxiv.org/abs/2607.20574">https://arxiv.org/abs/2607.20574</a>
+      </li>
+      <li>
+        Kaur, B. (2026) <em>Broken Object Level Authorization in the Wild: An Empirical Taxonomy from 100+ Bug Bounty Disclosures</em>. arXiv:2605.25865. Available at: <a href="https://arxiv.org/abs/2605.25865">https://arxiv.org/abs/2605.25865</a>
+      </li>
+      <li>
+        Tran, V.K., Nguyen, D.N.K., Nghi, H.K., Do, T.T.H., Pham, V.H. and Phan, T.D. (2026) <em>Red-MIRROR: Agentic LLM-based Autonomous Penetration Testing with Reflective Verification and Knowledge-augmented Interaction</em>. arXiv:2603.27127. Available at: <a href="https://arxiv.org/abs/2603.27127">https://arxiv.org/abs/2603.27127</a>
+      </li>
+      <li>
+        Walonoski, J. et al. (2018) 'Synthea: An approach, method, and software mechanism for generating synthetic patients and the synthetic electronic health care record', <em>Journal of the American Medical Informatics Association</em>, 25(3), pp. 230–238. <a href="https://doi.org/10.1093/jamia/ocx079">https://doi.org/10.1093/jamia/ocx079</a>
+      </li>
+      <li>
+        Wang, X. et al. (2025) 'OpenHands: An open platform for AI software developers as generalist agents', <em>Thirteenth International Conference on Learning Representations (ICLR 2025)</em>. <a href="https://doi.org/10.48550/arXiv.2407.16741">https://doi.org/10.48550/arXiv.2407.16741</a>
+      </li>
+    </ul>
+  </article>
+</body>
+</html>

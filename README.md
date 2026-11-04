@@ -1,6 +1,6 @@
-# Sláinte-Scan MCP (Clinical Support Edition)
+# Sláinte-Scan MCP (Deterministic Clinical Guardrail Server)
 
-A Model Context Protocol (MCP) server designed to act as a secure, legally-compliant interface bridging messy physical clinical notes and interoperable Electronic Health Records (EHR) infrastructure. Engineered specifically for Irish healthcare standards and EU MDR Class IIa regulatory hurdles.
+A Model Context Protocol (MCP) server by **SlainteTech AI Security Labs** designed as the zero-hallucination mathematical substrate for the **SlainteTech 9-Agent Autonomous Fleet** (`SlainteEngine-Ingest`, `SlainteScribe-Brief`, `SlainteRx-Guard`, `SlainteDx-Triage`, `SlainteShield`, and `SlainteGov`) across 7 clinical verticals. Engineered specifically for Irish healthcare standards (`urn:oid:1.3.6.1.4.1.54392.5.2690.42.80`) and EU MDR Class IIa regulatory hurdles.
 
 ## Technical & Clinical Architecture
 - **Language / Framework:** FastMCP & Python 3.11+
